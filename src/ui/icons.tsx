@@ -57,7 +57,7 @@ export function Brand() {
 		<div class="brand">
 			<img src="icons/32.png" width="32" height="32" alt="" />
 			<div>
-				<strong>Local Translate</strong>
+				<strong>AI Translate</strong>
 				<span>YOUR BROWSER. YOUR WORDS.</span>
 			</div>
 		</div>

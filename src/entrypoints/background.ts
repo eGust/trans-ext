@@ -2,6 +2,9 @@ import { isOrdinaryPage, isSelectionMessage, isTrustedSelectionSender, type Sele
 import { readPageSelection, selectionPayload } from '../core/page-selection';
 import { SelectionHandoffs } from '../core/selection-handoffs';
 
+// Content scripts must not read the API key.
+void chrome.storage.local.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(console.error);
+
 const handoffs = new SelectionHandoffs(chrome.storage.session);
 const CONTEXT_SELECTION_TIMEOUT_MS = 500;
 

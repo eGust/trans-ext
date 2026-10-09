@@ -3,16 +3,16 @@ import { afterEach, expect, test } from 'bun:test';
 import {
 	DEFAULT_PREFERENCES,
 	loadPreferences,
-	savePreferences,
 	restorePreferences,
 	validatePreferences,
 } from '../../src/core/preferences';
+import { saveEngineSettings } from '../../src/engines/gemini/settings';
 afterEach(() => {
 	delete (globalThis as { chrome?: unknown }).chrome;
 });
 
 test('stores only validated language and rate preferences locally', async () => {
-	let stored: Record<string, unknown> = {};
+	const stored: Record<string, unknown> = {};
 	(globalThis as { chrome?: unknown }).chrome = {
 		storage: {
 			local: {
@@ -20,29 +20,44 @@ test('stores only validated language and rate preferences locally', async () => 
 					return stored;
 				},
 				async set(value: Record<string, unknown>) {
-					stored = value;
+					Object.assign(stored, value);
+				},
+				async remove(key: string) {
+					delete stored[key];
 				},
 			},
 		},
 	};
 	expect(await loadPreferences()).toEqual(DEFAULT_PREFERENCES);
-	await savePreferences({
+	await saveEngineSettings(
+		{
+			primaryLanguage: 'en',
+			secondaryLanguage: 'ja',
+			speechRate: 1.3,
+			selectedText: 'must not be saved',
+			browsingUrl: 'https://example.com',
+		},
+		'',
+	);
+	expect(stored).toEqual({
+		preferences: { ...DEFAULT_PREFERENCES, primaryLanguage: 'en', secondaryLanguage: 'ja', speechRate: 1.3 },
+	});
+	expect(await loadPreferences()).toEqual({
+		...DEFAULT_PREFERENCES,
 		primaryLanguage: 'en',
 		secondaryLanguage: 'ja',
 		speechRate: 1.3,
-		selectedText: 'must not be saved',
-		browsingUrl: 'https://example.com',
 	});
-	expect(stored).toEqual({ preferences: { primaryLanguage: 'en', secondaryLanguage: 'ja', speechRate: 1.3 } });
-	expect(await loadPreferences()).toEqual({ primaryLanguage: 'en', secondaryLanguage: 'ja', speechRate: 1.3 });
 	await expect(
-		savePreferences({ primaryLanguage: 'zh', secondaryLanguage: 'zh-Hant', speechRate: 1 }),
+		saveEngineSettings({ primaryLanguage: 'zh', secondaryLanguage: 'zh-Hant', speechRate: 1 }, ''),
 	).rejects.toThrow();
-	expect(stored).toEqual({ preferences: { primaryLanguage: 'en', secondaryLanguage: 'ja', speechRate: 1.3 } });
+	expect(stored).toEqual({
+		preferences: { ...DEFAULT_PREFERENCES, primaryLanguage: 'en', secondaryLanguage: 'ja', speechRate: 1.3 },
+	});
 });
 
 test('voice preferences round-trip without storing runtime voice metadata or sample text', async () => {
-	let stored: Record<string, unknown> = {};
+	const stored: Record<string, unknown> = {};
 	(globalThis as { chrome?: unknown }).chrome = {
 		storage: {
 			local: {
@@ -50,7 +65,10 @@ test('voice preferences round-trip without storing runtime voice metadata or sam
 					return stored;
 				},
 				async set(value: Record<string, unknown>) {
-					stored = value;
+					Object.assign(stored, value);
+				},
+				async remove(key: string) {
+					delete stored[key];
 				},
 			},
 		},
@@ -60,21 +78,25 @@ test('voice preferences round-trip without storing runtime voice metadata or sam
 		primaryVoice: { voiceName: 'Tingting', lang: 'zh-CN' },
 		secondaryVoice: { voiceName: 'Alex', lang: 'en-GB', extensionId: 'local-engine' },
 	};
-	await savePreferences({
-		...preferences,
-		primaryVoice: { ...preferences.primaryVoice, remote: false, sampleText: 'never save' },
-	});
+	await saveEngineSettings(
+		{
+			...preferences,
+			primaryVoice: { ...preferences.primaryVoice, remote: false, sampleText: 'never save' },
+		},
+		'',
+	);
 	expect(stored).toEqual({ preferences });
 	expect(await loadPreferences()).toEqual(preferences);
-	await savePreferences({ ...preferences, primaryVoice: undefined, secondaryVoice: undefined });
+	await saveEngineSettings({ ...preferences, primaryVoice: undefined, secondaryVoice: undefined }, '');
 	expect(stored).toEqual({ preferences: DEFAULT_PREFERENCES });
 });
 
 test('old settings keep their languages and speed; invalid stored voice fields are discarded independently', () => {
 	const old = { primaryLanguage: 'ja', secondaryLanguage: 'fr', speechRate: 1.6 };
-	expect(restorePreferences(old)).toEqual(old);
+	expect(restorePreferences(old)).toEqual({ ...DEFAULT_PREFERENCES, ...old });
 	const secondaryVoice = { voiceName: 'Thomas', lang: 'fr-FR' };
 	expect(restorePreferences({ ...old, primaryVoice: { bad: true }, secondaryVoice })).toEqual({
+		...DEFAULT_PREFERENCES,
 		...old,
 		secondaryVoice,
 	});

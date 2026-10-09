@@ -12,7 +12,12 @@ import { DEFAULT_PREFERENCES, validatePreferences, restorePreferences } from '..
 const paragraph = 'This is a natural English paragraph. It contains enough words for language detection.';
 
 test('defaults are Simplified Chinese and English with normal speech rate', () => {
-	expect(DEFAULT_PREFERENCES).toEqual({ primaryLanguage: 'zh', secondaryLanguage: 'en', speechRate: 1 });
+	expect(DEFAULT_PREFERENCES).toMatchObject({
+		primaryLanguage: 'zh',
+		secondaryLanguage: 'en',
+		speechRate: 1,
+		engine: 'native',
+	});
 });
 
 describe('primary/secondary routing', () => {

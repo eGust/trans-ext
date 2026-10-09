@@ -10,6 +10,7 @@ async function background(fail?: 'read' | 'update' | 'storage') {
 	const tabs: { id: number; url: string }[] = [];
 	const menus: unknown[] = [];
 	const removed: number[] = [];
+	const accessLevels: string[] = [];
 	const event = (key: string) => ({
 		addListener(listener: (...args: any[]) => any) {
 			handlers[key] = listener;
@@ -32,6 +33,11 @@ async function background(fail?: 'read' | 'update' | 'storage') {
 		},
 		commands: { onCommand: event('command') },
 		storage: {
+			local: {
+				async setAccessLevel({ accessLevel }: { accessLevel: string }) {
+					accessLevels.push(accessLevel);
+				},
+			},
 			session: {
 				async get() {
 					return { ...session };
@@ -74,8 +80,13 @@ async function background(fail?: 'read' | 'update' | 'storage') {
 	const settle = async () => {
 		for (let i = 0; i < 50; i++) await Promise.resolve();
 	};
-	return { handlers, session, tabs, menus, removed, settle };
+	return { handlers, session, tabs, menus, removed, accessLevels, settle };
 }
+
+test('worker initialization restricts local settings to trusted extension contexts', async () => {
+	const b = await background();
+	expect(b.accessLevels).toEqual(['TRUSTED_CONTEXTS']);
+});
 
 test('context menu opens a translation tab with one-use, tab-bound text held only in session memory', async () => {
 	const b = await background();

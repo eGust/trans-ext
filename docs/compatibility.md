@@ -1,5 +1,76 @@
 # Compatibility and verification
 
+## V2 implementation — 2026-10-09
+
+AI Translate 0.2.0 adds opt-in Gemini streaming, the ordered model chain, local usage caps, automatic native fallback, key management and recovery controls. Native remains the default. The sections below this V2 record describe historical V1 builds; their native-only/CSP statements do not describe 0.2.0.
+
+### API and permission evidence
+
+Isolated Chrome 155.0.8059.40 and Edge 154.0.4258.62 profiles loaded the unpacked production build. Both popup and selection extension documents successfully listed models, generated text and consumed streaming responses with `x-goog-api-key`, the Gemini-only `connect-src`, and **no host permissions**. CORS is sufficient for this build in both browsers. Save, Test key and translation therefore contain no host-grant request or check. The extension still requests only `contextMenus`, `storage`, `tts`, `activeTab` and `scripting`.
+
+- A real invalid-key request returned HTTP 400, `INVALID_ARGUMENT`, with `google.rpc.ErrorInfo.reason = API_KEY_INVALID` and `domain = googleapis.com`.
+- Listing with `pageSize=1000` returned 62 models and no next token for the tested key. Multi-page listing, failed later pages and page-token loops have synthetic coverage.
+- All three default models accepted the production prompt, `thinkingLevel: minimal`, the five adjustable safety categories set to `OFF`, and the output limit. A short English → Chinese passage through the production streaming client completed on all three:
+
+  | Model                   | First display text | Completion | Input tokens |
+  | ----------------------- | ------------------ | ---------- | ------------ |
+  | `gemini-3.5-flash-lite` | 1,120 ms           | 1,327 ms   | 99           |
+  | `gemini-3.1-flash-lite` | 755 ms             | 966 ms     | 99           |
+  | `gemma-4-26b-a4b-it`    | 1,340 ms           | 2,041 ms   | 99           |
+
+- Sixteen bounded short requests to Flash Lite all returned 200. No real 429 was captured, and the project's daily quota was not exhausted. Daily/minute quota classification and RetryInfo delays therefore use **synthetic fixtures**, not an observed generateContent 429 schema. An unrecognized 429 uses the minute-limit path.
+- Restricted-project and leaked-key responses were not induced on the user's project. The permission allowlist uses Google's [Service Infrastructure error reason definitions](https://github.com/googleapis/googleapis/blob/master/google/api/error_reason.proto): `API_KEY_SERVICE_BLOCKED`, `API_KEY_HTTP_REFERRER_BLOCKED`, `API_KEY_IP_ADDRESS_BLOCKED`, `API_KEY_ANDROID_APP_BLOCKED`, `API_KEY_IOS_APP_BLOCKED`, `SERVICE_DISABLED`, and `CONSUMER_INVALID`. These are documented reasons with synthetic tests, not captured project responses. Unknown 403 reasons stay model-local and expire at Pacific midnight; the documented leaked-key message requires replacement.
+- `x-gemini-service-tier` was absent/unreadable in these requests. `usageMetadata.serviceTier: standard` does not identify free versus paid billing. Settings does not infer the project's billing tier, and no billing configuration was changed.
+
+### Long-text limits
+
+A raw API stress probe repeated sample paragraphs to 4,000 characters with a shorter translation instruction and an 8,192-token output limit. Its timing measured the **first received chunk**, not necessarily the first display text:
+
+| Model          | Source   | Input tokens | First chunk | Completion | Finish     |
+| -------------- | -------- | ------------ | ----------- | ---------- | ---------- |
+| 3.5 Flash Lite | Chinese  | 2,374        | 868 ms      | 4,732 ms   | STOP       |
+| 3.5 Flash Lite | Japanese | 2,018        | 905 ms      | 46,286 ms  | MAX_TOKENS |
+| 3.5 Flash Lite | English  | 709          | 834 ms      | 2,380 ms   | STOP       |
+| 3.1 Flash Lite | Chinese  | 2,374        | 1,077 ms    | 45,715 ms  | MAX_TOKENS |
+| 3.1 Flash Lite | Japanese | 2,018        | 968 ms      | 47,033 ms  | MAX_TOKENS |
+| 3.1 Flash Lite | English  | 709          | 1,337 ms    | 50,516 ms  | MAX_TOKENS |
+
+The first long Gemma probe did not finish within the probe's 65-second limit, so its remaining long samples were not run. This is not proof that arbitrary 4,000-character passages work across the chain. Repetition can cause runaway output. Production accepts only nonempty STOP output, discards incomplete attempts, and advances the chain. It uses a 10-second first-text/idle deadline and a 60-second total deadline per model; the controller's 120 seconds measures inactivity across the pipeline, not total elapsed time. Tests cover a continuously streaming timeout and cancellation even when a fetch/stream double ignores abort.
+
+The measured Chinese/Japanese input counts were below one token per source character and English below one per three characters for these samples. The production estimate adds its own instruction and uses those conservative character weights until actual `promptTokenCount` arrives. These samples do not establish an upper bound for arbitrary content or every tokenizer.
+
+### Production and controlled browser checks
+
+| Check | Chrome | Edge |
+| --- | --- | --- |
+| Native default, online disclosure before Save, masked key, Gemini settings persistence | Pass | Pass |
+| Test key from Settings with real listing and generation; unsaved key remains unsaved | Pass | Pass |
+| Actual Gemini English → Chinese in the production selection document | Pass | Pass |
+| Switch to native after completion: preserve text and producing-model label | Pass | Pass |
+| Remove key: credential removed and native selected | Pass | Pass |
+| Automatic popup selection and selection-tab handoff (selection APIs replaced; no OS menu click) | Pass | Pass |
+| Failed online chain → native activation error → direct native retry, no extra API request (controlled responses) | Pass | Pass |
+| All models return generic 403; Test key restores only the successful model (controlled responses) | Pass | Pass |
+| Cancel pending fetch and discard partial result (controlled response) | Pass | Pass |
+| Native unavailable error points to Gemini Settings (native API replacement) | Pass | Pass |
+| HTML-shaped model output remains literal text; 375-pixel Settings layout has no horizontal overflow | Pass | Pass |
+| Actual toolbar popup at 100% default zoom: 440 × 600 CSS pixels, no outer overflow | Pass | Pass |
+| Actual toolbar popup at 125% default zoom: wheel scrolling reaches the footer, including with expanded native error help | Pass | Pass |
+| Model setup guide appears for a native availability error and stays hidden for a same-language input error | Pass | Pass |
+| Extension page reads a dummy saved key; injected content-script `chrome.storage.local.get` is rejected | Pass | Pass |
+
+These checks drove visible extension documents through browser debugging in task-owned profiles. Native API/fetch replacements were used only for the specified error paths, never as evidence of successful live translation. Real native translation behavior remains as recorded for V1 below; Gemini does not repair Edge's native model runtime.
+
+The zoom checks changed each isolated profile's default browser zoom, verified the setting and exercised actual toolbar popups. At 125%, both browsers reported a 480-CSS-pixel viewport; wheel input scrolled the document by 120 pixels even with `body.popup` set to `overflow-y: hidden`. With native error help expanded, both the inner shell and the document scrolled, and the footer remained reachable. The reported inaccessible-footer issue did not reproduce on the Chrome and Edge versions listed above, so that CSS rule is retained.
+
+To repeat the storage-access check manually, save a dummy key in an isolated profile and inject an extension content script into an ordinary webpage after invoking the extension action. Its `await chrome.storage.local.get('geminiApiKey')` must reject with "Access to storage is not allowed from this context." The same read from an extension page must succeed. This checks the production worker's `TRUSTED_CONTEXTS` restriction without exposing a real key.
+
+### Automated verification and remaining checks
+
+`bun run check` passes formatting, oxlint, Solid ESLint, strict TypeScript checking, the automated test suite, and the 0.2.0 production build. Tests cover streaming and finish reasons, redaction, full model pagination, auth/permission/precondition separation, quota windows and Pacific DST, model availability persistence/expiry, matching-key recovery, stale/cancelled writes, independent preference restoration, engine-change handling, filtered setup guidance, and native fallback/retry. No dependency was added.
+
+Remaining manual checks: actual toolbar/context-menu/keyboard flows with Gemini in a normal profile, system clipboard clicks, macOS composition/Escape, audible speech/rapid replacement, and an actual browser restart with recovery state. Store re-instantiation and recovery behavior have automated coverage. Real quota exhaustion and project restriction bodies remain unverified as stated above. These outstanding checks are not counted as complete browser acceptance.
+
 ## V1 implementation — 2026-10-09
 
 The user requested the whole extension after reviewing the Phase 0 blockers. Implementation has proceeded through the V1 feature and packaging phases, while retaining the native-only design and the observed Edge failure. This is not a claim that the original Chrome-and-Edge acceptance gate has passed.

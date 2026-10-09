@@ -1,11 +1,7 @@
-import {
-	translate,
-	type TranslationRequest,
-	type TranslationResult,
-	type TranslationUpdate,
-} from '../native-ai/translate';
-import { friendlyError } from './errors';
-import type { LanguagePreferences } from './language-routing';
+import { friendlyError, TranslationSettingsChangedError } from './errors';
+import type { Preferences } from './preferences';
+import { redact } from './redact';
+import { translate, type TranslationRequest, type TranslationResult, type TranslationUpdate } from './translate';
 
 export type TranslationState =
 	| { status: 'idle' }
@@ -29,7 +25,7 @@ export class TranslationController {
 		this.disposed = true;
 		this.cancel();
 	}
-	async run(request: TranslationRequest, preferences: LanguagePreferences) {
+	async run(request: TranslationRequest, preferences: Preferences) {
 		if (this.disposed) return;
 		this.current?.abort();
 		const controller = new AbortController();
@@ -62,11 +58,16 @@ export class TranslationController {
 			if (this.current === controller) this.onState({ status: 'done', result });
 		} catch (error) {
 			if (this.current === controller) {
+				// A storage revision can be observed before its onChanged event arrives.
+				if (error instanceof TranslationSettingsChangedError) {
+					this.onState({ status: 'idle' });
+					return;
+				}
 				const friendly = friendlyError(error);
 				if (friendly.code === 'unknown')
 					console.warn('Unexpected native translation error', {
 						name: error instanceof Error ? error.name : typeof error,
-						message: error instanceof Error ? error.message : 'Unknown thrown value',
+						message: error instanceof Error ? redact(error.message, [request.text]) : 'Unknown thrown value',
 					});
 				this.onState({ status: 'error', error: friendly });
 			}

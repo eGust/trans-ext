@@ -1,3 +1,5 @@
+import { defaultModels, restoreModels, validateModels, type ModelConfig } from '../engines/gemini/config';
+import type { EngineId } from '../engines/types';
 import { baseLanguage, canonicalLanguage, type LanguagePreferences } from './language-routing';
 import { LANGUAGES } from './languages';
 
@@ -7,11 +9,15 @@ export interface VoicePreference {
 	extensionId?: string;
 }
 export interface Preferences extends LanguagePreferences {
+	engine: EngineId;
+	geminiModels: ModelConfig[];
 	speechRate: number;
 	primaryVoice?: VoicePreference;
 	secondaryVoice?: VoicePreference;
 }
 export const DEFAULT_PREFERENCES: Readonly<Preferences> = Object.freeze({
+	engine: 'native',
+	geminiModels: defaultModels(),
 	primaryLanguage: 'zh',
 	secondaryLanguage: 'en',
 	speechRate: 1,
@@ -53,7 +59,11 @@ export function validatePreferences(value: unknown): Preferences {
 		throw new Error('Speech rate must be between 0.5× and 2×.');
 	const primary = validateVoice(primaryVoice);
 	const secondary = validateVoice(secondaryVoice);
+	const { engine = 'native', geminiModels = defaultModels() } = value as Record<string, unknown>;
+	if (engine !== 'native' && engine !== 'gemini') throw new Error('Choose a valid translation engine.');
 	return {
+		engine,
+		geminiModels: validateModels(geminiModels),
 		primaryLanguage,
 		secondaryLanguage,
 		speechRate,
@@ -76,6 +86,8 @@ export function restorePreferences(value: unknown): Preferences {
 		const stored = value as Record<string, unknown>;
 		return validatePreferences({
 			...stored,
+			engine: stored.engine === 'gemini' ? 'gemini' : 'native',
+			geminiModels: restoreModels(stored.geminiModels),
 			primaryVoice: restoreVoice(stored.primaryVoice),
 			secondaryVoice: restoreVoice(stored.secondaryVoice),
 		});
@@ -86,9 +98,4 @@ export function restorePreferences(value: unknown): Preferences {
 export async function loadPreferences(): Promise<Preferences> {
 	const stored = await chrome.storage.local.get(PREFERENCES_KEY);
 	return restorePreferences(stored[PREFERENCES_KEY]);
-}
-export async function savePreferences(value: unknown): Promise<Preferences> {
-	const preferences = validatePreferences(value);
-	await chrome.storage.local.set({ [PREFERENCES_KEY]: preferences });
-	return preferences;
 }

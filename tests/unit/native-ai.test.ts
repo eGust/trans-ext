@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import { DEFAULT_PREFERENCES } from '../../src/core/preferences';
-import { translate, type NativeEnvironment, type TranslationUpdate } from '../../src/native-ai/translate';
+import { translate, type NativeEnvironment, type TranslationUpdate } from '../../src/core/translate';
 const text = 'This is an English paragraph. It has enough content to detect its language reliably.';
 
 function native(

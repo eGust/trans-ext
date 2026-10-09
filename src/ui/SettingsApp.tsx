@@ -1,14 +1,11 @@
 import { createMemo, createSignal, For, onCleanup, onMount, Show } from 'solid-js';
 
 import { LANGUAGES, languageLabel } from '../core/languages';
-import {
-	DEFAULT_PREFERENCES,
-	loadPreferences,
-	savePreferences,
-	validatePreferences,
-	type Preferences,
-} from '../core/preferences';
+import { DEFAULT_PREFERENCES, loadPreferences, validatePreferences, type Preferences } from '../core/preferences';
+import { removeGeminiKey, saveEngineSettings } from '../engines/gemini/settings';
+import { API_KEY } from '../engines/gemini/usage';
 import { compatibleLocalVoices, SpeechController, voiceKey } from '../tts/tts';
+import { EngineSettings } from './EngineSettings';
 import { Brand, Icon } from './icons';
 
 type VoiceRole = 'primary' | 'secondary';
@@ -25,6 +22,9 @@ const PREVIEW_TEXT: Record<(typeof LANGUAGES)[number]['tag'], string> = {
 
 export function SettingsApp() {
 	const [draft, setDraft] = createSignal<Preferences>({ ...DEFAULT_PREFERENCES });
+	const [apiKey, setApiKey] = createSignal('');
+	const [savedKey, setSavedKey] = createSignal(false);
+	let resetAvailability = false;
 	const [message, setMessage] = createSignal('');
 	const [hasError, setHasError] = createSignal(false);
 	const [saving, setSaving] = createSignal(false);
@@ -67,8 +67,12 @@ export function SettingsApp() {
 		window.addEventListener('pagehide', pagehide);
 		void refreshVoices();
 		try {
-			const saved = await loadPreferences();
-			if (!disposed) setDraft(saved);
+			const [saved, stored] = await Promise.all([loadPreferences(), chrome.storage.local.get(API_KEY)]);
+			if (!disposed) {
+				setDraft(saved);
+				setApiKey(typeof stored[API_KEY] === 'string' ? stored[API_KEY] : '');
+				setSavedKey(!!stored[API_KEY]);
+			}
 		} catch {
 			if (!disposed) {
 				setHasError(true);
@@ -116,12 +120,36 @@ export function SettingsApp() {
 		try {
 			validatePreferences(draft());
 			setSaving(true);
-			await savePreferences(draft());
-			if (!disposed) setMessage('Settings saved. Your languages, voices, and speech rate are ready to use.');
+			await saveEngineSettings(draft(), apiKey(), chrome.storage.local, resetAvailability);
+			resetAvailability = false;
+			if (!disposed) {
+				setSavedKey(!!apiKey().trim());
+				setMessage('Settings saved. Your engine, languages and speech settings are ready to use.');
+			}
 		} catch (error) {
 			if (!disposed) {
 				setHasError(true);
 				setMessage(error instanceof Error ? error.message : 'Settings could not be saved. Please retry.');
+			}
+		} finally {
+			if (!disposed) setSaving(false);
+		}
+	}
+	async function removeKey() {
+		setSaving(true);
+		try {
+			await removeGeminiKey();
+			if (!disposed) {
+				setApiKey('');
+				setSavedKey(false);
+				setDraft((previous) => ({ ...previous, engine: 'native' }));
+				setHasError(false);
+				setMessage('API key removed. Browser built-in AI is selected.');
+			}
+		} catch {
+			if (!disposed) {
+				setHasError(true);
+				setMessage('The key could not be removed. Please retry.');
 			}
 		} finally {
 			if (!disposed) setSaving(false);
@@ -145,6 +173,22 @@ export function SettingsApp() {
 				<p>Set your everyday languages. We’ll take care of the direction.</p>
 			</section>
 			<form class="settings-card" onSubmit={(event) => void save(event)}>
+				<EngineSettings
+					value={draft()}
+					edit={edit}
+					apiKey={apiKey()}
+					editKey={(value) => {
+						setApiKey(value);
+						setMessage('');
+					}}
+					savedKey={savedKey()}
+					removeKey={removeKey}
+					restoreDefaults={() => {
+						resetAvailability = true;
+						setMessage('Defaults restored in this form. Save settings to apply and re-enable the restored models.');
+					}}
+					disabled={!ready() || saving()}
+				/>
 				<fieldset disabled={!ready() || saving()}>
 					<legend>Your languages</legend>
 					<label class="setting-label" for="primary-language">
@@ -307,10 +351,10 @@ export function SettingsApp() {
 			<section class="settings-footnote">
 				<Icon name="shield" />
 				<div>
-					<strong>Your words stay local.</strong>
+					<strong>You choose where translation happens.</strong>
 					<p>
-						Translation runs in your browser. First use may download language models. We don’t save your text, keep a
-						translation history, or send it to a translation service.
+						Browser built-in AI translates on your device. Gemini sends text to Google using your key. We don’t save
+						your text or keep a translation history. Speech always uses installed local voices.
 					</p>
 					<p>
 						Use the right-click menu to translate selected text in a separate tab. An optional keyboard command can be

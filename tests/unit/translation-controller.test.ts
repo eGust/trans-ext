@@ -1,9 +1,11 @@
 import { expect, jest, spyOn, test } from 'bun:test';
 
 import { DEFAULT_PREFERENCES } from '../../src/core/preferences';
+import type { TranslationOutcome, TranslateOptions } from '../../src/core/translate';
 import { TranslationController, type TranslationState } from '../../src/core/translation-controller';
-import type { TranslationOutcome, TranslateOptions } from '../../src/native-ai/translate';
 const outcome = (translatedText: string): TranslationOutcome => ({
+	engine: 'native',
+	attempts: [],
 	kind: 'translated',
 	translatedText,
 	sourceText: 'Text',
@@ -155,6 +157,37 @@ test('a stalled download still times out even if it repeats the same percentage'
 	} finally {
 		controller.dispose();
 		await pending;
+		jest.useRealTimers();
+	}
+});
+
+test('Gemini attempt and partial updates refresh inactivity beyond two minutes', async () => {
+	jest.useFakeTimers();
+	let options!: TranslateOptions;
+	let complete!: (result: TranslationOutcome) => void;
+	const states: TranslationState[] = [];
+	const controller = new TranslationController(
+		(state) => states.push(state),
+		(_request, _prefs, opts) => {
+			options = opts!;
+			return new Promise((resolve) => {
+				complete = resolve;
+			});
+		},
+	);
+	const pending = controller.run({ text: 'test' }, DEFAULT_PREFERENCES);
+	try {
+		for (let i = 0; i < 3; i++) {
+			jest.advanceTimersByTime(50_000);
+			options.onUpdate!({ stage: 'attempt', model: `model-${i}` });
+			options.onUpdate!({ stage: 'partial', text: 'streamed text' });
+			expect(options.signal!.aborted).toBe(false);
+		}
+		complete(outcome('done'));
+		await pending;
+		expect(states.at(-1)?.status).toBe('done');
+	} finally {
+		controller.dispose();
 		jest.useRealTimers();
 	}
 });

@@ -10,15 +10,21 @@ import {
 	restorePreferences,
 	type Preferences,
 } from '../core/preferences';
+import type { TranslationOutcome, TranslationUpdate } from '../core/translate';
 import { TranslationController, type TranslationState } from '../core/translation-controller';
 import {
+	attemptModelForUpdate,
 	confidenceLabel,
 	escapeAction,
 	isComposingInput,
-	languageSettingsChanged,
+	settingsChange,
+	offerGemini,
+	nativeRetryAttempts,
 	reusableSourceLanguage,
 } from '../core/translator-interactions';
-import type { TranslationOutcome, TranslationUpdate } from '../native-ai/translate';
+import { API_KEY, REVISION_KEY } from '../engines/gemini/usage';
+import { modelName, translationLabel } from '../engines/labels';
+import type { Attempt, EngineId } from '../engines/types';
 import { SpeechController, preferredVoiceFor, speechFor, type SpeechState } from '../tts/tts';
 import { Brand, Icon } from './icons';
 
@@ -36,8 +42,13 @@ export function TranslatorApp(props: { selection?: boolean }) {
 	const [source, setSource] = createSignal('');
 	const [targetOverride, setTargetOverride] = createSignal('');
 	const [preferences, setPreferences] = createSignal<Preferences>({ ...DEFAULT_PREFERENCES });
+	const [hasSavedKey, setHasSavedKey] = createSignal(false);
 	const [ready, setReady] = createSignal(false);
 	const [state, setState] = createSignal<TranslationState>({ status: 'idle' });
+	const [partial, setPartial] = createSignal('');
+	const [attemptModel, setAttemptModel] = createSignal<string>();
+	const [retryAttempts, setRetryAttempts] = createSignal<Attempt[]>([]);
+	let activeEngine: EngineId | undefined;
 	const [detection, setDetection] = createSignal<DetectionAssessment>();
 	const [notice, setNotice] = createSignal('');
 	const [copied, setCopied] = createSignal(false);
@@ -48,6 +59,7 @@ export function TranslatorApp(props: { selection?: boolean }) {
 	let copyTimer: ReturnType<typeof setTimeout> | undefined;
 	let disposed = false;
 	let inputRevision = 0;
+	let settingsRevision = 0;
 	let composing = false;
 	const tts = new SpeechController(chrome.tts, (status, error) => {
 		setSpeech(status);
@@ -56,6 +68,20 @@ export function TranslatorApp(props: { selection?: boolean }) {
 	});
 	const controller = new TranslationController((value) => {
 		setState(value);
+		if (value.status !== 'working') {
+			setPartial('');
+			setAttemptModel(undefined);
+		}
+		if (value.status === 'working') setAttemptModel((previous) => attemptModelForUpdate(previous, value.update));
+		if (value.status === 'working' && value.update?.stage === 'attempt') {
+			setPartial('');
+		}
+		if (value.status === 'working' && value.update?.stage === 'partial') setPartial(value.update.text);
+		if (value.status === 'working' && value.update?.stage === 'translating') {
+			setPartial('');
+		}
+		if (value.status === 'error') setRetryAttempts(nativeRetryAttempts(value.error));
+		if (value.status === 'done' && value.result.kind === 'translated') setRetryAttempts([]);
 		if (value.status === 'working' && value.update?.stage === 'detected') setDetection(value.update.assessment);
 		if (value.status === 'done' && value.result.kind === 'uncertain') {
 			setDetection(value.result.assessment);
@@ -93,6 +119,7 @@ export function TranslatorApp(props: { selection?: boolean }) {
 	};
 	const submitLabel = () => {
 		if (working()) return 'Restart translation';
+		if (retryAttempts().length) return 'Translate with built-in AI';
 		if (error()) return 'Try again';
 		return 'Translate';
 	};
@@ -100,6 +127,8 @@ export function TranslatorApp(props: { selection?: boolean }) {
 		const current = state();
 		if (current.status !== 'working') return '';
 		const update: TranslationUpdate | undefined = current.update;
+		if (attemptModel()) return `Translating with ${modelName(attemptModel())}…`;
+		if (update?.stage === 'partial' && !update.text) return 'Preparing on-device translation…';
 		if (update?.stage === 'download')
 			return `Preparing ${update.model === 'detector' ? 'language detection' : 'translation model'}${update.progress === undefined ? '…' : ` · ${Math.round(update.progress * 100)}%`}`;
 		if (update?.stage === 'model' && update.availability !== 'available')
@@ -109,6 +138,8 @@ export function TranslatorApp(props: { selection?: boolean }) {
 	};
 	function invalidate() {
 		inputRevision++;
+		activeEngine = undefined;
+		setRetryAttempts([]);
 		controller.cancel();
 		tts.stop();
 		setDetection(undefined);
@@ -125,10 +156,18 @@ export function TranslatorApp(props: { selection?: boolean }) {
 		// A confirmed detection is reusable for this unchanged input. This also
 		// allows a fresh click to authorize a translator after detector download.
 		const override = reusableSourceLanguage(source(), detection());
+		const revision = inputRevision;
+		activeEngine = retryAttempts().length ? 'native' : preferences().engine;
 		await controller.run(
-			{ text: text(), sourceLanguageOverride: override, targetLanguageOverride: targetOverride() || undefined },
+			{
+				text: text(),
+				sourceLanguageOverride: override,
+				targetLanguageOverride: targetOverride() || undefined,
+				...(retryAttempts().length ? { engine: 'native' as const, attempts: retryAttempts() } : {}),
+			},
 			preferences(),
 		);
+		if (revision === inputRevision) activeEngine = undefined;
 	}
 	async function copyResult() {
 		const value = outcome()?.translatedText;
@@ -189,13 +228,23 @@ export function TranslatorApp(props: { selection?: boolean }) {
 		}
 	}
 	const storageChanged = (changes: Record<string, chrome.storage.StorageChange>, area: string) => {
-		if (area !== 'local' || !changes[PREFERENCES_KEY]) return;
-		const next = restorePreferences(changes[PREFERENCES_KEY].newValue);
-		const languagesChanged = languageSettingsChanged(preferences(), next);
-		if (languagesChanged) invalidate();
-		else tts.stop();
+		if (area !== 'local' || ![PREFERENCES_KEY, API_KEY, REVISION_KEY].some((key) => changes[key])) return;
+		settingsRevision++;
+		if (changes[API_KEY]) setHasSavedKey(!!changes[API_KEY].newValue);
+		const next = changes[PREFERENCES_KEY] ? restorePreferences(changes[PREFERENCES_KEY].newValue) : preferences();
+		const effect = settingsChange(preferences(), next, !!changes[API_KEY] || !!changes[REVISION_KEY], activeEngine);
+		if (effect.invalidate) invalidate();
+		else {
+			if (effect.cancel) {
+				inputRevision++;
+				if (working()) controller.cancel();
+				activeEngine = undefined;
+			}
+			if (effect.clearRetry) setRetryAttempts([]);
+			if (effect.stopSpeech) tts.stop();
+		}
 		setPreferences(next);
-		setNotice(languagesChanged ? 'Language settings updated.' : 'Speech settings updated.');
+		if (effect.notice) setNotice(effect.notice);
 	};
 	onMount(async () => {
 		const initialRevision = inputRevision;
@@ -205,8 +254,16 @@ export function TranslatorApp(props: { selection?: boolean }) {
 		if (!props.selection) textarea.focus();
 		chrome.storage.onChanged.addListener(storageChanged);
 		try {
-			const prefs = await loadPreferences();
-			if (!disposed) setPreferences(prefs);
+			for (;;) {
+				if (disposed) return;
+				const revision = settingsRevision;
+				const [prefs, stored] = await Promise.all([loadPreferences(), chrome.storage.local.get(API_KEY)]);
+				if (disposed) return;
+				if (settingsRevision !== revision) continue;
+				setPreferences(prefs);
+				setHasSavedKey(!!stored[API_KEY]);
+				break;
+			}
 		} catch {
 			if (!disposed) setNotice('Settings could not be loaded. Using Chinese and English for now.');
 		}
@@ -218,6 +275,10 @@ export function TranslatorApp(props: { selection?: boolean }) {
 				try {
 					const response: unknown = await chrome.runtime.sendMessage({ type: 'selection:take', token });
 					if (disposed) return;
+					if (inputRevision !== initialRevision) {
+						history.replaceState(null, '', 'selection.html');
+						return;
+					}
 					if (
 						response &&
 						typeof response === 'object' &&
@@ -456,57 +517,72 @@ export function TranslatorApp(props: { selection?: boolean }) {
 					<div class="message error" role="alert">
 						<strong>Translation needs attention</strong>
 						<p>{error()!.message}</p>
+						<Show when={!error()?.attempts?.length && offerGemini(preferences().engine, error()?.code)}>
+							<button class="quiet-button" type="button" onClick={() => void chrome.runtime.openOptionsPage()}>
+								{hasSavedKey()
+									? 'Select Google Gemini (online) in Settings'
+									: 'Or use Google Gemini (online) in Settings'}{' '}
+								<Icon name="arrow" size={14} />
+							</button>
+						</Show>
+						<Show when={error()?.attempts?.length}>
+							<button class="quiet-button" type="button" onClick={() => void chrome.runtime.openOptionsPage()}>
+								Open Gemini settings
+							</button>
+						</Show>
 					</div>
 				</Show>
 			</form>
-			<details
-				class="model-help"
-				open={['activation', 'download', 'unavailable', 'timeout'].includes(error()?.code ?? '')}
-			>
-				<summary>Set up translation models</summary>
-				<p>
-					Your browser downloads models when you first translate a supported language pair. There is no separate file to
-					install.
-				</p>
-				<ol>
-					<li>
-						Connect to the internet, enter some text, and choose the <strong>FROM</strong> and <strong>TO</strong>{' '}
-						languages.
-					</li>
-					<li>
-						Click the green <strong>Translate</strong> button above, or <strong>Try again</strong> after an error. This
-						starts any required downloads.
-					</li>
-					<li>
-						Keep this popup or tab open until translation finishes. Progress appears above when the browser reports it.
-						If asked for another click, click <strong>Try again</strong>.
-					</li>
-				</ol>
-				<p>
-					For a longer setup, right-click selected text on a webpage and choose <strong>Translate selection</strong> to
-					use a tab.
-				</p>
-				<p>
-					If a download fails, check your connection and retry. If the model still cannot start, update or restart your
-					browser, or try another language pair. An installed model can also fail to start; downloading it again may not
-					help.
-				</p>
-				<p>
-					Once ready, the models translate on your device. Browser help:{' '}
-					<a href="https://developer.chrome.com/docs/ai/translator-api" target="_blank" rel="noreferrer">
-						Chrome
-					</a>{' '}
-					·{' '}
-					<a
-						href="https://learn.microsoft.com/en-us/microsoft-edge/web-platform/translator-api"
-						target="_blank"
-						rel="noreferrer"
-					>
-						Edge
-					</a>
-					.
-				</p>
-			</details>
+			<Show when={['activation', 'download', 'unavailable', 'timeout', 'unknown'].includes(error()?.code ?? '')}>
+				<details
+					class="model-help"
+					open={['activation', 'download', 'unavailable', 'timeout'].includes(error()?.code ?? '')}
+				>
+					<summary>Set up translation models</summary>
+					<p>
+						Your browser downloads models when you first translate a supported language pair. There is no separate file
+						to install.
+					</p>
+					<ol>
+						<li>
+							Connect to the internet, enter some text, and choose the <strong>FROM</strong> and <strong>TO</strong>{' '}
+							languages.
+						</li>
+						<li>
+							Click the green <strong>Translate</strong> button above, or <strong>Try again</strong> after an error.
+							This starts any required downloads.
+						</li>
+						<li>
+							Keep this popup or tab open until translation finishes. Progress appears above when the browser reports
+							it. If asked for another click, click <strong>Try again</strong>.
+						</li>
+					</ol>
+					<p>
+						For a longer setup, right-click selected text on a webpage and choose <strong>Translate selection</strong>{' '}
+						to use a tab.
+					</p>
+					<p>
+						If a download fails, check your connection and retry. If the model still cannot start, update or restart
+						your browser, or try another language pair. An installed model can also fail to start; downloading it again
+						may not help.
+					</p>
+					<p>
+						Once ready, the models translate on your device. Browser help:{' '}
+						<a href="https://developer.chrome.com/docs/ai/translator-api" target="_blank" rel="noreferrer">
+							Chrome
+						</a>{' '}
+						·{' '}
+						<a
+							href="https://learn.microsoft.com/en-us/microsoft-edge/web-platform/translator-api"
+							target="_blank"
+							rel="noreferrer"
+						>
+							Edge
+						</a>
+						.
+					</p>
+				</details>
+			</Show>
 			<p class="sr-only" role="status">
 				{outcome() ? `Translation complete in ${languageLabel(outcome()!.targetLanguage)}.` : ''}
 			</p>
@@ -515,8 +591,11 @@ export function TranslatorApp(props: { selection?: boolean }) {
 					<h2 id="translation-label">Translation</h2>
 					<span class="result-language">{languageLabel(outcome()?.targetLanguage ?? target())}</span>
 				</div>
+				<Show when={outcome()}>
+					<p class="engine-label">{translationLabel(outcome()!)}</p>
+				</Show>
 				<Show
-					when={outcome()}
+					when={outcome() || partial()}
 					fallback={
 						<p class="output-placeholder">
 							{working() ? 'Your translation is on its way…' : 'A different language. The same meaning.'}
@@ -524,7 +603,7 @@ export function TranslatorApp(props: { selection?: boolean }) {
 					}
 				>
 					<p class="translated-text" id="translation-result" lang={outcome()?.targetLanguage} dir="auto">
-						{outcome()?.translatedText}
+						{outcome()?.translatedText ?? partial()}
 					</p>
 				</Show>
 				<div class="panel-footer">
@@ -551,9 +630,13 @@ export function TranslatorApp(props: { selection?: boolean }) {
 			</Show>
 			<footer class="app-footer">
 				<span class="local-badge">
-					<Icon name="shield" size={13} /> ON-DEVICE
+					<Icon name="shield" size={13} /> {preferences().engine === 'gemini' ? 'ONLINE · GEMINI' : 'ON-DEVICE'}
 				</span>
-				<span>No account. No cloud translation.</span>
+				<span>
+					{preferences().engine === 'gemini'
+						? 'Text is sent to Google for translation.'
+						: 'No account. No cloud translation.'}
+				</span>
 			</footer>
 			<p class="download-note">Your browser may download language models the first time.</p>
 		</main>

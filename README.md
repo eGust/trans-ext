@@ -1,8 +1,8 @@
-# Local Translate
+# AI Translate
 
-A Manifest V3 translation extension for desktop Chrome and Edge, built with TypeScript, SolidJS, and Vite. Translation uses browser-provided on-device models; speech uses installed local voices. No account, backend, API key, or cloud translation service is involved.
+A Manifest V3 translation extension for desktop Chrome and Edge, built with TypeScript, SolidJS, and Vite. Use the browser's on-device translation models or opt into Google Gemini with your own API key. Language detection and speech stay on your device; Gemini requests go directly to Google, without an extension backend.
 
-**V1 implementation is ready to load.** Chrome translation was verified on the local test machine. The installed Edge version exposes the APIs but its native translation service crashes; the extension reports that failure and does not switch providers. See [compatibility and remaining browser checks](docs/compatibility.md).
+**V2 (0.2.0) is ready to load.** Browser built-in AI remains the default. Gemini translation was verified in Chrome and Edge; the tested Edge installation still cannot run its native translation service. See [compatibility and remaining browser checks](docs/compatibility.md).
 
 ## Install from source
 
@@ -17,7 +17,7 @@ bun run check
 
 1. Open `chrome://extensions` or `edge://extensions`.
 2. Enable **Developer mode**, choose **Load unpacked**, and select `dist/`.
-3. Pin **Local Translate** in the extensions menu if desired.
+3. Pin **AI Translate** in the extensions menu if desired.
 4. After rebuilding, reload the extension on the extensions page.
 
 Other development commands:
@@ -43,7 +43,7 @@ The extension does not request offscreen permission. Dependencies are pinned in 
 
 ## Use
 
-Select text on an ordinary webpage and open the toolbar popup. It fills the source box and starts translation automatically using your language settings. The popup reads the main frame, including selected text in supported text inputs and textareas. For iframe selections, use the right-click menu or paste manually. If no selection is available or page access is blocked, the popup opens ready for typing. Selections over 4,000 characters show a message without being truncated.
+Select text on an ordinary webpage and open the toolbar popup. It fills the source box and starts translation automatically using your saved engine and language settings. **With Gemini selected, this sends the selection to Google once its source language is resolved, without another Translate click.** The popup reads the main frame, including selected text in supported text inputs and textareas. For iframe selections, use the right-click menu or paste manually. If no selection is available or page access is blocked, the popup opens ready for typing. Selections over 4,000 characters show a message without being truncated.
 
 You can also paste or type up to 4,000 characters and click **Translate**. **Ctrl+Enter** or **Command+Enter** also translates. Typing alone does not run detection or translation. Copy the result or use the separate **Listen** controls for the original and translation. Click the active **Stop** control to stop speech.
 
@@ -65,15 +65,31 @@ The source selector lets you correct detection. Short text, low-confidence resul
 
 On an ordinary HTTP(S) webpage, select a passage and choose **Translate selection** from the right-click menu. It opens a translation tab next to the original page and starts detection. The original page is untouched, and the toolbar popup does not need to be open. The extension reads the clicked frame's selection to keep paragraph breaks. If access is blocked or the frame does not respond within 500 ms, it uses the browser's selection snapshot, which may flatten line breaks.
 
-This tab is the V1 selection surface. Phase 0 found that new model pairs need a visible user gesture and that the tested offscreen setup used a testing-only permission reason. The production extension therefore uses the verified visible extension document instead of an unproven offscreen overlay.
+The tab uses the same engine and automatic-send behavior as the popup. It stays open while you return to the original page and can obtain the user activation needed to prepare native models.
 
 The optional **Translate selected text in a new tab** keyboard command has no reserved default shortcut. Assign one at `chrome://extensions/shortcuts` or `edge://extensions/shortcuts`. It reads the main frame's selected text; for text inside an iframe, use the right-click menu or paste it manually. Browser-internal pages, extension stores, PDFs with restricted viewers, and other protected pages may disallow selection access. The translation tab explains failures and accepts pasted text as a fallback.
 
 Escape cancels an active translation. An idle popup closes on Escape; a selection tab stays open. Use its Close button or the browser's tab controls to close it. Composition keystrokes are ignored by the extension's shortcuts. Closing or navigating away cancels work and requests a stop for that document's live speech. Source text and results are not restored after closing or reloading the document.
 
-### First use and unsupported models
+### Choose an engine
 
-Open **Set up translation models** below the Translate button for a step-by-step guide in either the popup or selection tab. It also expands when model setup reports an error. The browser manages downloads; no model file needs to be installed manually. For a setup that stays open, use **Translate selection** from a webpage's right-click menu.
+In **Settings → Translation engine**, keep **Browser built-in AI** for on-device translation, or choose **Google Gemini (online)**. The online disclosure appears before Save enables Gemini.
+
+1. Use **Get a key** to open Google AI Studio and create a key, preferably for a dedicated project.
+2. Paste it into the masked API-key field. **Test key** checks the model listing and sends a fixed short sample; it uses quota and does not save your changes or send your selection.
+3. Click **Save settings**. Gemini now streams translations into the popup and selection tab. Every finished result identifies its engine/model and any fallback reasons.
+
+The default chain tries `gemini-3.5-flash-lite`, `gemini-3.1-flash-lite`, then `gemma-4-26b-a4b-it`. If none can translate, the extension tries Browser built-in AI. If that step needs user activation, **Translate with built-in AI** retries it directly without resending to Gemini. On the tested Edge installation, a failed Gemini chain can also end in a native model error; both reasons are shown.
+
+Invalid keys, recognized project restrictions, billing exhaustion and unmet prerequisites pause Gemini until you replace/remove the key or pass **Test key** with the saved key. A key Google reports as leaked needs replacement. A generic model access denial disables that model until the next Pacific midnight or a successful generation probe; a missing model stays disabled until explicit recovery. **Advanced · model chain and local usage** shows the affected models and their recovery guidance. A successful key test restores only the model it actually generated with.
+
+Advanced settings let you edit model IDs, order and local RPM/TPM/RPD caps. Zero skips a model. Counts are approximate, cover this extension only, and cannot see other clients using the same project. Daily counts reset at midnight Pacific time. Defaults are a release snapshot, not an API quota guarantee. **Restore defaults**, followed by Save, also resets model availability; it does not erase usage, quota cooldowns or a saved key's pause.
+
+**Remove key** deletes the locally stored credential immediately and selects Browser built-in AI. Key management stays available while a key is saved, even when the native engine is selected. Engine/key/model changes cancel affected running translations but preserve finished results and their original labels; Gemini-only edits leave native work alone. Language changes still clear the result.
+
+### Native model setup and limits
+
+The **Set up translation models** guide appears below the Translate button only after an activation, model download, availability, timeout or unexpected translation error, including a failed native fallback. Input errors and cancellation do not show the guide; it also stays hidden while idle or translating and after success. Known model setup errors expand the guide automatically. The browser manages downloads; no model file needs to be installed manually. For a setup that stays open, use **Translate selection** from a webpage's right-click menu.
 
 The browser may download language models initially. Keep the popup/tab open; progress appears when provided. Detection and a new translation pair can need separate user activation, including after the popup starts automatically. If prompted, click **Try again** inside the popup/tab. Advancing model downloads reset the two-minute inactivity timeout; a stalled operation still times out.
 
@@ -83,19 +99,33 @@ If speech reports no local voice, retry after the browser finishes enumerating v
 
 ## Privacy and permissions
 
-Only language preferences, selected voice identities, and speech rate are saved to `chrome.storage.local`. Selection handoffs use `chrome.storage.session` (memory only), are bound to the receiving tab, and can be consumed once. They are valid for one minute, removed on consumption, and stale entries are pruned on subsequent handoff access. Browser shutdown clears session storage. At most ten pending handoffs are kept. Text never appears in a handoff URL, and browsing URLs are not saved.
+`chrome.storage.local` holds language/voice preferences, speech rate, engine/model settings, approximate usage counters, pauses and model availability. Access is restricted to extension pages and the background worker; content scripts cannot read it. The Gemini API key is stored separately, on this device only, **without encryption at rest**. Requests send it in the `x-goog-api-key` header, never a URL. **Remove key** deletes the credential and its pause/availability records; it preserves unrelated preferences and usage. Keys are never bundled into the extension or stored in `storage.sync`.
+
+Source text and results are not saved as translation history. Selection handoffs use `chrome.storage.session` (memory only), are bound to the receiving tab, and can be consumed once. They are valid for one minute, removed on consumption, and stale entries are pruned on subsequent handoff access. Browser shutdown clears session storage. At most ten pending handoffs are kept. Text never appears in a handoff URL, and browsing URLs are not saved. Persisted provider error details are redacted; usage records contain counts and timestamps, not passages.
 
 | Permission | Purpose |
 | --- | --- |
 | `contextMenus` | Translate selection menu |
-| `storage` | Local preferences and temporary in-memory selection handoffs |
+| `storage` | Local settings, optional API key, usage/recovery state, and temporary in-memory selection handoffs |
 | `tts` | Local speech and stop controls |
 | `activeTab`, `scripting` | Read the current selection when the toolbar popup opens or the optional keyboard command is invoked |
 
-There are no host permissions, permanent content scripts, telemetry, external translation calls, or translation history. Extension CSP disallows application network connections with `connect-src 'none'`. Browser model downloads and browser updates can still use the network. Copying happens only when you click **Copy**.
+There are no host permissions, permanent content scripts, telemetry, remote scripts, or extension backend. Gemini's CORS support was verified in popup and selection documents in both browsers, so no host grant is requested or checked. Extension CSP allows application connections only to `https://generativelanguage.googleapis.com`. Native translation and local speech do not send your passages to Gemini; browser model downloads and browser updates can still use the network. Copying happens only when you click **Copy**.
+
+**Automatic online sending:** when Gemini is selected, opening the popup with selected text or opening a selection tab automatically sends that text to Google once the source language is resolved, without another Translate click. Saving Gemini in Settings opts into this behavior. The Settings disclosure remains visible outside the collapsed advanced section.
+
+Under Google's [Unpaid Services terms](https://ai.google.dev/gemini-api/terms#unpaid-services), input and output are used to improve products, and "human reviewers may read, annotate, and process your API input and output". The terms also say: "Do not submit sensitive, confidential, or personal information to the Unpaid Services." The terms apply Paid Services data-use rules to users in the EEA, Switzerland and UK even for unpaid quota.
+
+Separately, Google's [Use Restrictions](https://ai.google.dev/gemini-api/terms#use-restrictions) require Paid Services when making API clients available to users in the EEA, Switzerland or UK. Any future distribution of V2 must account for this requirement.
+
+Linking billing changes a project to paid per-token pricing; the local caps are not a free allowance. Check the project's current quota and billing in AI Studio. Paid prompts/responses are not used to improve Google's products, although limited abuse-prevention logging remains under the [Paid Services terms](https://ai.google.dev/gemini-api/terms#paid-services).
 
 ## Verification and limitations
 
-The implementation follows [the V1 plan](docs/browser-ai-translator-v1-plan.md). Core routing and lifecycle work was developed with failing tests first. The suite covers routing, uncertainty, tag fallback, preferences, model states, cancellation, stale results, local speech, message validation, and handoff cleanup.
+The automated suite covers routing, uncertainty, tag fallback, native lifecycle, local speech, selection handoffs, SSE parsing, deadlines, error classification, model fallback, Pacific quota resets, key tests/removal, recovery state and preferences migration. Run `bun run check` for the complete validation and build.
 
-[Compatibility notes](docs/compatibility.md) distinguish real native results from mocked error checks and list the remaining manual smoke tests. The actual toolbar popup's selection-prefill flow was verified in both browsers, with automatic translation in Chrome. Native context-menu activation, system clipboard behavior, and audible speech checks still need manual confirmation. Edge's model failure remains an environmental compatibility issue; cross-browser acceptance is not claimed complete.
+[Compatibility notes](docs/compatibility.md) distinguish live Gemini/native results from controlled error checks and list remaining manual smoke tests. Real Gemini generation passed in Chrome and Edge, and all three default models passed a short sample through the production client. Controlled browser checks cover automatic selections, access recovery, direct native retry, cancellation, settings changes and narrow layouts. Real 429 and restricted-project responses were not captured; those paths use synthetic fixtures.
+
+Long or repetitive passages can produce slow or truncated output; incomplete output is never accepted as a finished translation. Each Gemini attempt has a 10-second first-text/idle deadline and a 60-second total deadline. The controller's 120 seconds is an inactivity timeout, not a limit on the whole chain. Local counters are approximate across simultaneous extension documents and cannot enforce a project-wide spend limit.
+
+Native context-menu activation, system clipboard behavior, real input-method interaction and audible speech still need manual confirmation. Edge's native model failure remains an environmental compatibility issue; complete manual cross-browser acceptance is not claimed.
