@@ -8,7 +8,7 @@ Audience: Codex CLI / Claude Code / human maintainers
 
 Build a lightweight, privacy-oriented browser translation extension similar in interaction style to Simple Translate. **V1 supports desktop Google Chrome and Microsoft Edge only**, uses their **built-in on-device Translator and Language Detector APIs** for translation, and uses **built-in browser/system text-to-speech (TTS)**. It has no backend, no third-party AI provider, no API keys, and no paid service dependency.
 
-**Most important behavior:** Users configure a *primary language* and a *secondary language*. Translation direction is automatically selected from the detected source language:
+**Most important behavior:** Users configure a _primary language_ and a _secondary language_. Translation direction is automatically selected from the detected source language:
 
 - If source language is **different from primary**, translate **into primary**.
 - If source language **is primary**, translate **into secondary**.
@@ -17,13 +17,13 @@ Defaults: primary `zh` (Simplified Chinese), secondary `en` (English).
 
 Example:
 
-| Selected text language | Detected source | Target | Result |
-| --- | --- | --- | --- |
-| English | `en` | `zh` | Chinese |
-| Japanese | `ja` | `zh` | Chinese |
-| French | `fr` | `zh` | Chinese |
-| Simplified Chinese | `zh` | `en` | English |
-| Traditional Chinese | `zh-Hant` | `en` | English (see normalization policy below) |
+| Selected text language | Detected source | Target | Result                                   |
+| ---------------------- | --------------- | ------ | ---------------------------------------- |
+| English                | `en`            | `zh`   | Chinese                                  |
+| Japanese               | `ja`            | `zh`   | Chinese                                  |
+| French                 | `fr`            | `zh`   | Chinese                                  |
+| Simplified Chinese     | `zh`            | `en`   | English                                  |
+| Traditional Chinese    | `zh-Hant`       | `en`   | English (see normalization policy below) |
 
 ## 2. Fixed scope and explicit non-goals
 
@@ -52,7 +52,7 @@ Persist preferences as BCP 47 language tags:
 
 ```ts
 interface LanguagePreferences {
-  primaryLanguage: string;   // default "zh"
+  primaryLanguage: string; // default "zh"
   secondaryLanguage: string; // default "en"
 }
 ```
@@ -75,13 +75,10 @@ Example reference logic (not production-ready validation):
 
 ```ts
 function baseLanguage(tag: string): string {
-  return tag.split("-")[0].toLowerCase();
+  return tag.split('-')[0].toLowerCase();
 }
 
-function chooseTarget(
-  detectedSource: string,
-  prefs: LanguagePreferences,
-): string {
+function chooseTarget(detectedSource: string, prefs: LanguagePreferences): string {
   return baseLanguage(detectedSource) === baseLanguage(prefs.primaryLanguage)
     ? prefs.secondaryLanguage
     : prefs.primaryLanguage;
@@ -90,7 +87,7 @@ function chooseTarget(
 
 **Mixed-language policy:** Source detection is at the selected-text level, not sentence-by-sentence. V1 may translate the entire selection according to the predominant detected language. Surface ambiguous results; do not attempt segmented multilingual translation yet.
 
-**Chinese script policy:** Primary default is Simplified Chinese, `zh`. Treat Chinese script variants as Chinese for *routing* (translate to English). Actual output script and browser language-pack support must be verified in Chrome and Edge; do not promise script conversion or exact Simplified/Traditional formatting without testing.
+**Chinese script policy:** Primary default is Simplified Chinese, `zh`. Treat Chinese script variants as Chinese for _routing_ (translate to English). Actual output script and browser language-pack support must be verified in Chrome and Edge; do not promise script conversion or exact Simplified/Traditional formatting without testing.
 
 ## 4. UI and interactions
 
@@ -117,8 +114,7 @@ function chooseTarget(
 
 - Primary language selector (default Simplified Chinese).
 - Secondary language selector (default English).
-- Validate different base languages; show explanatory text:
-  `If selected text is in your primary language, translate it into your secondary language; otherwise, translate into your primary language.`
+- Validate different base languages; show explanatory text: `If selected text is in your primary language, translate it into your secondary language; otherwise, translate into your primary language.`
 - TTS rate setting (default 1.0); optionally voice selectors per language if reliable; fallback to OS defaults.
 - Save to `chrome.storage.local` (or `sync` only after evaluating portability/privacy; local is preferred for V1).
 

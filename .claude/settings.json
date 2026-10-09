@@ -1,0 +1,49 @@
+{
+	"hooks": {
+		"UserPromptSubmit": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-lint-hook.sh turn-start"
+					}
+				]
+			}
+		],
+		"PostToolUse": [
+			{
+				"matcher": "Edit|MultiEdit|Write|NotebookEdit",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-lint-hook.sh after-tool"
+					}
+				]
+			}
+		],
+		"SubagentStop": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-lint-hook.sh check",
+						"timeout": 120,
+						"statusMessage": "Linting files changed by the agent"
+					}
+				]
+			}
+		],
+		"Stop": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "\"$CLAUDE_PROJECT_DIR\"/scripts/agent-lint-hook.sh check",
+						"timeout": 120,
+						"statusMessage": "Linting files changed by the agent"
+					}
+				]
+			}
+		]
+	}
+}

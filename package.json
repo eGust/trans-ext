@@ -1,27 +1,37 @@
 {
-  "name": "browser-ai-translator",
-  "version": "0.1.0",
-  "private": true,
-  "type": "module",
-  "packageManager": "bun@1.4.2",
-  "engines": {
-    "bun": "1.4.2"
-  },
-  "scripts": {
-    "dev": "bun run --bun vite build --watch",
-    "build": "bun run --bun vite build",
-    "typecheck": "bun run --bun tsc --noEmit",
-    "test": "bun test",
-    "check": "bun run typecheck && bun test && bun run build"
-  },
-  "dependencies": {
-    "solid-js": "1.9.17"
-  },
-  "devDependencies": {
-    "@types/bun": "1.4.2",
-    "@types/chrome": "0.3.4",
-    "typescript": "7.0.2",
-    "vite": "8.3.4",
-    "vite-plugin-solid": "2.11.14"
-  }
+	"name": "browser-ai-translator",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "vite build --watch",
+		"build": "vite build",
+		"format": "oxfmt",
+		"format:check": "oxfmt --check",
+		"lint": "oxlint --deny-warnings && eslint --max-warnings 0",
+		"lint:fix": "oxlint --fix --deny-warnings && eslint --fix --max-warnings 0",
+		"typecheck": "bun node_modules/typescript-go/bin/tsc --noEmit",
+		"test": "bun test",
+		"check": "bun run format:check && bun run lint && bun run typecheck && bun test && bun run build"
+	},
+	"dependencies": {
+		"solid-js": "1.9.17"
+	},
+	"devDependencies": {
+		"@types/bun": "1.4.2",
+		"@types/chrome": "0.3.4",
+		"@typescript-eslint/parser": "8.68.0",
+		"eslint": "10.9.1",
+		"eslint-plugin-solid": "0.16.0",
+		"oxfmt": "0.68.0",
+		"oxlint": "1.83.0",
+		"typescript": "6.0.3",
+		"typescript-go": "npm:typescript@7.0.2",
+		"vite": "8.3.4",
+		"vite-plugin-solid": "2.11.14"
+	},
+	"engines": {
+		"bun": "1.4.2"
+	},
+	"packageManager": "bun@1.4.2"
 }

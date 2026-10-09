@@ -1,0 +1,57 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"plugins": ["unicorn", "typescript", "oxc", "import", "jsx-a11y"],
+	"categories": {
+		"correctness": "error",
+		"suspicious": "error",
+		"perf": "error",
+		"style": "off",
+		"pedantic": "off"
+	},
+	"rules": {
+		"eslint/array-callback-return": "error",
+		"eslint/eqeqeq": "error",
+		"eslint/no-case-declarations": "error",
+		"eslint/no-constructor-return": "error",
+		"eslint/no-fallthrough": "error",
+		"eslint/no-nested-ternary": "error",
+		"eslint/no-promise-executor-return": "error",
+		"eslint/no-await-in-loop": "off",
+		"eslint/no-redeclare": "error",
+		"eslint/one-var": ["error", "never"],
+		"eslint/no-use-before-define": ["error", { "functions": false, "classes": true, "variables": true }],
+		"typescript/no-non-null-assertion": "off",
+		"unicorn/filename-case": ["error", { "cases": { "kebabCase": true, "pascalCase": true } }],
+		"unicorn/consistent-function-scoping": "off",
+		"import/no-unassigned-import": ["error", { "allow": ["**/*.css"] }],
+		"jsx-a11y/no-noninteractive-element-interactions": ["error", { "main": ["onKeyDown"] }],
+		"jsx-a11y/prefer-tag-over-role": "off"
+	},
+	"settings": {
+		"jsx-a11y": {
+			"attributes": {
+				"for": ["htmlFor", "for"]
+			}
+		}
+	},
+	"overrides": [
+		{
+			"files": ["src/**/*.tsx"],
+			"rules": {
+				"eslint/no-unassigned-vars": "off"
+			}
+		},
+		{
+			"files": ["tests/**/*.{ts,tsx}"],
+			"rules": {
+				"typescript/no-extraneous-class": "off"
+			}
+		}
+	],
+	"env": {
+		"builtin": true,
+		"browser": true,
+		"webextensions": true
+	},
+	"ignorePatterns": ["dist/**", "node_modules/**"]
+}
