@@ -1,0 +1,27 @@
+{
+  "name": "browser-ai-translator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "bun@1.4.2",
+  "engines": {
+    "bun": "1.4.2"
+  },
+  "scripts": {
+    "dev": "bun run --bun vite build --watch",
+    "build": "bun run --bun vite build",
+    "typecheck": "bun run --bun tsc --noEmit",
+    "test": "bun test",
+    "check": "bun run typecheck && bun test && bun run build"
+  },
+  "dependencies": {
+    "solid-js": "1.9.17"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/chrome": "0.3.4",
+    "typescript": "7.0.2",
+    "vite": "8.3.4",
+    "vite-plugin-solid": "2.11.14"
+  }
+}
